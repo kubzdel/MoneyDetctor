@@ -81,6 +81,8 @@ def displaySaveImage(imgs, filename="planes_bin.png"):
         io.imshow(imgs[i])
     fig.savefig(filename, dpi=500)
 
+
+
 def thresh(t):
     # warnings.simplefilter("ignore")
     binary = (edges > t) * 255
@@ -90,8 +92,8 @@ def thresh(t):
     binary = skimage.morphology.dilation(binary)
     # plt.contour(binary)
     #colorize(binary)
-   # binary = clear_border(binary)
-  #  fill_coins = ndi.binary_fill_holes(binary)
+    #binary = clear_border(binary)
+   # fill_coins = ndi.binary_fill_holes(binary)
    # binary = skimage.color.gray2rgb(binary)
     binary = label(binary)
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -99,16 +101,20 @@ def thresh(t):
 
     for region in regionprops(binary):
         # take regions with large enough areas
-        if region.area >= 1500:
+        if region.area >= 1300:
             # draw rectangle around segmented coins
             minr, minc, maxr, maxc = region.bbox
+
             rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
                                       fill=False, edgecolor='red', linewidth=2)
+         #   print(region.mean_intensity)
+            coin = image[minr:maxr, minc:maxc]
+            images.append(coin)
             ax.add_patch(rect)
+
 
     ax.set_axis_off()
     plt.tight_layout()
-    images.append(binary)
     # print(contours)
 
 
@@ -123,13 +129,15 @@ def thresh(t):
 
 
 
-directory = os.getcwd()+"\data" + '/'
+directory = os.getcwd()+"\moje" + '/'
 images = []
+
 for file in os.listdir(directory):
     image = img.load(directory+file,True)
-    edges = skimage.feature.canny(image)
-
-    maxV = getMax("sobel_max_", edges)
-    thresh(0.15)
-#displaySaveImage(images)
+    image2 = img.load(directory+file,False)
+    edges = skimage.filters.sobel(image)
+    edges = skimage.feature.canny(edges,1.2)
+    meanV = getMean("sobel_max_", edges)
+    thresh(0.08)
+displaySaveImage(images)
 plt.show()
