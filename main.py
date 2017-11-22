@@ -5,8 +5,9 @@ from matplotlib.pyplot import figure, subplot
 from skimage import data as img
 from skimage import filters
 from matplotlib import pyplot as plt
-from skimage.measure import label, regionprops
+from skimage.measure import label, regionprops, find_contours
 from skimage.morphology import closing
+from skimage.draw import line
 from skimage.segmentation import clear_border
 import skimage.morphology as mp
 import numpy as np
@@ -81,6 +82,17 @@ def displaySaveImage(imgs, filename="planes_bin.png"):
         io.imshow(imgs[i])
     fig.savefig(filename, dpi=500)
 
+def region_is_inside_another(region_sizes, region_to_check):
+    for region in region_sizes:
+        if region_to_check[0] > region[0] and region_to_check[1] > region[1] and region_to_check[2] < region[2] and region_to_check[3] < region[3]:
+            return True
+    return False
+
+def circle_detector(x, y, num):
+    xc = np.mean(x)
+    yc = np.mean(y)
+    r = (x-xc)**2 + (y-yc)**2 #try to figure out radius of the circle with the middle of the xc and yc
+    return ("%.2f" % (100 * np.std(r) / np.mean(r)), ( np.std(r) / np.mean(r)))
 
 
 def thresh(t):
@@ -97,11 +109,17 @@ def thresh(t):
    # binary = skimage.color.gray2rgb(binary)
     binary = label(binary)
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.imshow(binary)
+    ax.imshow(image2)
 
-    for region in regionprops(binary):
+    regions = regionprops(binary)
+
+    region_sizes = [reg.bbox for reg in regions]
+    for region in regions:
+        if region_is_inside_another(region_sizes, region.bbox):
+            continue
+
         # take regions with large enough areas
-        if region.area >= 1300:
+        if region.area >= 1300 and region.area < (.5*len(binary)*len(binary[0])):
             # draw rectangle around segmented coins
             minr, minc, maxr, maxc = region.bbox
 
@@ -129,7 +147,7 @@ def thresh(t):
 
 
 
-directory = os.getcwd()+"\moje" + '/'
+directory = os.getcwd()+"\\moje" + '/'
 images = []
 
 for file in os.listdir(directory):
@@ -139,5 +157,5 @@ for file in os.listdir(directory):
     edges = skimage.feature.canny(edges,1.2)
     meanV = getMean("sobel_max_", edges)
     thresh(0.08)
-displaySaveImage(images)
+#displaySaveImage(images)
 plt.show()
