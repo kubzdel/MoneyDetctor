@@ -3,13 +3,13 @@ from code import interact
 
 from matplotlib.pyplot import figure, subplot
 from skimage import data as img
-from skimage import filters
+from skimage import filters, segmentation, exposure
 from matplotlib import pyplot as plt
-from skimage.color import rgb2gray, label2rgb
+from skimage.color import rgb2gray, label2rgb, rgb2hsv
 from skimage.feature import ORB, match_descriptors
 from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops, find_contours
-from skimage.morphology import closing, disk, square
+from skimage.morphology import closing, disk, square, erosion, dilation, watershed
 from skimage.draw import line
 from skimage.segmentation import clear_border
 import skimage.morphology as mp
@@ -131,28 +131,103 @@ def region_is_inside_another(region_sizes, region_to_check):
             return True
     return False
 
+
+
+def silver_detector(coin):
+
+    diffrences = [[np.max(element) - np.min(element) for element in row if np.max(element) - np.min(element) < 10] for
+                  row in coin]
+
+    ratio = sum(len(row) for row in diffrences) / (len(coin) * len(coin[0]))
+    return ratio,ratio > .5
+
+def silver_detector_clear_background(coin):
+    points = 0
+    eligible = 0
+    for row in coin:
+        for element in row:
+            if np.all(element == 0):
+                continue
+            value = np.max(element) - np.min(element)
+            if value < 10:
+                eligible += 1
+            points += 1
+
+    ratio = eligible / points
+
+    return (ratio,ratio > .1)
 def circle_detector(x, y, num):
     xc = np.mean(x)
     yc = np.mean(y)
     r = (x-xc)**2 + (y-yc)**2 #try to figure out radius of the circle with the middle of the xc and yc
     return ("%.2f" % (100 * np.std(r) / np.mean(r)), ( np.std(r) / np.mean(r)))
 
+def clear_background(img, mask):
+    for row in range(0, len(img)):
+        for column in range(0, len(img[0])):
+            if mask[row][column]:
+                img[row][column] = [0,0,0]
+
+def calculate_mean(img):
+    img2 = rgb2hsv(img)[:,:,0]
+    img2 = np.where(img2 == 0, np.nan, img2)
+    mean = np.nanmean(img2)
+    return mean
+
+
+
+def plot_histogram(img):
+    plt.hist(img.ravel(), 256, [0, 256])
+    plt.show()
 def thresh(t):
     binary = skimage.morphology.dilation(edges)
     binary = label(binary)
+
+    '''
+    return
+    contours = find_contours(binary, .2, fully_connected='high')
+    for i, img in enumerate(contours):
+        binary[img] = 1
+    drawPlot(binary)
+    return
     #drawPlot(binary)
 
+    #coins detection method 1
+    binary = dilation(binary)
+    fill_coins = fill_coins = ndi.binary_fill_holes(binary)
+    label_objects, nb_labels = ndi.label(fill_coins)
+    sizes = np.bincount(label_objects.ravel())
+    mask_sizes = sizes > 200
+    mask_sizes[0] = 0
+    coins_cleaned = mask_sizes[label_objects]
+    
+
+    plot_histogram(image2)
+    
+    binary = image
+    markers = np.zeros_like(binary)
+    markers[binary < np.percentile(binary, 45)] = 1
+    markers[binary > np.percentile(binary, 90)] = 2
+    unique, counts = np.unique(markers, return_counts=True)
+    values = dict(zip(unique, counts))
+    print(values)
+    elevation_map = filters.sobel(binary)
+    segmentation = watershed(elevation_map, markers)
+    segmentation = ndi.binary_fill_holes(segmentation - 1)
+    labeled_coins, _ = ndi.label(segmentation)
+    drawPlot(labeled_coins)
+    return
+    '''
     regions = regionprops(binary)
     region_sizes = [reg.bbox for reg in regions]
     iter  = 0
-    plt.tight_layout()
     for region in regions:
         if region_is_inside_another(region_sizes, region.bbox):
             continue
 
         # take regions with large enough areas
         if region.area >= 1300 and region.area < (.5*len(binary)*len(binary[0])):
-            #fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
             name  =  "fig_{q}_{w}".format(q = fig_name, w = iter)
 
             # draw rectangle around segmented coins
@@ -160,16 +235,29 @@ def thresh(t):
             #rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
             #                          fill=False, edgecolor='red', linewidth=2)
             coin = image2[minr:maxr, minc:maxc]
-            #r,g,b = extractRGB(coin)
-            r = coin[:,:,0]
-            g = coin[:,:,1]
-            b = coin[:,:,2]
-            diffrences = [[np.max(element) - np.min(element) for element in row if np.max(element) - np.min(element) < 20] for row in coin]
 
-            #print(name, np.max([np.median(r),np.median(g),np.median(b)]) - np.min([np.median(r), np.median(g), np.median(b)]))
-            ratio = sum(len(row) for row in diffrences) / (len(coin)*len(coin[0]))
-            if ratio > .5:
-                print(name, "jest srebrna")
+            binary = ndi.binary_fill_holes(dilation(binary))
+            clear_background(coin, ~binary[minr:maxr, minc:maxc])
+            ration, is_silver = silver_detector_clear_background(coin)
+            print(name, ration)
+
+            coin = filters.gaussian(coin, 2)
+            mean_cut = calculate_mean(coin)
+            #drawPlot(coin)
+            #drawPlot(filters.gaussian(coin, 2))
+            ax.imshow(coin)
+            #h = rgb2hsv(coin)[:,:,0]
+            #h[h < np.percentile(h, 12.5)] = 0
+            #h[h > np.percentile(h, 87.5)] = 1
+            #ax.text(0, -10,"mean: {m}, median {m1} , rozrzut {m2}".format(m = np.mean(h), m1 = np.median(h), m2 = np.percentile(h,87.5) - np.percentile(h, 12.5)), color='k', fontsize=10)
+            #str = "{n};{m};{m1};{m2}".format(n = name, m = np.mean(h), m1 = np.median(h), m2 = np.percentile(h,87.5) - np.percentile(h, 12.5))
+            str = "{n};{m};{s};{r}".format(n = name, m = mean_cut, s = is_silver, r = ration)
+            ax.text(0, -10,str, color='k', fontsize=10)
+            log.write(str + "\n")
+            plt.savefig("h_means_clear_background" + "/" + name)
+            #plot_histogram(coin)
+            #r,g,b = extractRGB(coin)
+
             #coin = filters.median(coin, np.ones((5,5)))
             #extractRGB(coin)
             #color_distance(coin)
@@ -215,11 +303,6 @@ def thresh(t):
             flush_figures()
 
 
-    #ax.set_axis_off()
-    #plt.tight_layout()
-    # print(contours)
-
-
 
 directory = os.getcwd()+"\\templates" + '/'
 images = []
@@ -238,7 +321,7 @@ plt.show()
 '''
 directory = os.getcwd()+"\\moje" + '/'
 
-log = open("out/figures_median_ones5.csv", "w+")
+log = open("out/h_means_clear_background.csv", "w+")
 for file in os.listdir(directory):
     # images.append(rgb2gray(img.load(directory + file)))
     #ORB
@@ -256,8 +339,33 @@ for file in os.listdir(directory):
     #standard
     image = img.load(directory+file,True)
     image2 = img.load(directory+file,False)
+    '''
+    image2 = rgb2hsv(image2)
+    h = image2[:,:,0]   #take h values
+    h_prim = filters.median(h)
+    R = np.zeros(image2.shape)
+    R[:,:,:] = [1,0,0]
+    image2 = image2+h_prim*R
+    drawPlot(image2)
+    '''
+
+    ''' Roman
+    imgColor = exposure.rescale_intensity(image2)
+    imgG = rgb2gray(imgColor)
+    gauss = filters.gaussian(imgG, sigma=0.5)
+    canny = feature.canny(gauss, sigma=1)
+    sobel = filters.sobel(canny)
+    dil = mp.dilation(sobel)
+    contours = find_contours(dil, 0.2)
+    for i, img in enumerate(contours):
+        drawPlot(img)
+    continue
+    '''
+
+    #edges = filters.gaussian(image)
     edges = skimage.filters.sobel(image)
     edges = skimage.feature.canny(edges,1.2)
+
     #meanV = getMean("sobel_max_", edges)
     thresh(0.08)
     fig_name += 1
