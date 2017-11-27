@@ -1,6 +1,6 @@
 from skimage import io
 from code import interact
-
+import operator
 from matplotlib.pyplot import figure, subplot
 from skimage import data as img
 from skimage import filters, segmentation, exposure
@@ -28,6 +28,9 @@ from glob import glob
 import histogram_manipulator
 import ORB_detector as detector
 import cv2
+
+from skimage.morphology import convex_hull_image
+
 
 
 import PIL
@@ -143,7 +146,7 @@ def silver_detector(coin):
 
 def silver_detector_clear_background(coin):
     points = 0
-    eligible = 0
+    eligible = 0    #pixels which has small variety of rgb components
     for row in coin:
         for element in row:
             if np.all(element == 0):
@@ -155,7 +158,8 @@ def silver_detector_clear_background(coin):
 
     ratio = eligible / points
 
-    return (ratio,ratio > .1)
+    return (ratio,ratio > .095)
+
 def circle_detector(x, y, num):
     xc = np.mean(x)
     yc = np.mean(y)
@@ -174,171 +178,150 @@ def calculate_mean(img):
     mean = np.nanmean(img2)
     return mean
 
+def get_ORB_detector_templates():
+    directory = os.getcwd() + "\\templates" + '/'
+    img_templates = [[.05, "5gr.png"], [1, "1zl.png"]]
+    img_templates = [histogram_manipulator.contrast_stretching(img.load(directory + name[1], True)) for name in img_templates]
+    return img_templates
 
-
-def plot_histogram(img):
-    plt.hist(img.ravel(), 256, [0, 256])
+def draw_plot_with_oryginal(image, oryg_image, name = "image.png"):
+    fig, (ax, ax2) = plt.subplots(ncols=2, nrows=1, figsize=(10,10))
+    plt.tight_layout()
+    ax.imshow(image, cmap=plt.cm.gray)
+    ax2.imshow(oryg_image, cmap=plt.cm.gray)
     plt.show()
-def thresh(t):
-    binary = skimage.morphology.dilation(edges)
-    binary = label(binary)
+    #plt.savefig(name)
+    flush_figures()
 
-    '''
-    return
-    contours = find_contours(binary, .2, fully_connected='high')
+def plot_histogram(img, name):
+    fig, (ax, ax2) = plt.subplots(ncols=2, nrows=1, figsize=(10,10))
+    histo, x = np.histogram(img*255, range(0, 256), density=True)
+    ax.plot(np.arange(0, 255, 1),histo)
+    ax2.imshow(img)
+    #plt.show()
+    fig.savefig("clear_background_hists_convex_mask/" + name + ".png")
+    #plt.hist(img.ravel(), 256, [0, 256])
+    #plt.show()
+
+#maska będąca otoczką wypukłą
+def get_convex_hull_mask(img_binary, label):
+    bin = (img_binary == label)
+    return convex_hull_image(bin)
+
+#maska bedaca wypelnieniem ksztaltu z labelowania
+def get_filled_shape_mask(img_binary):
+    return ndi.binary_fill_holes(dilation(img_binary))
+def save_coin_with_text(coin, text, dir, name):
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    ax.imshow(coin)
+    ax.text(0, -10, text, color='k', fontsize=10)
+    plt.savefig(dir + "/" + name + ".png")
+
+def top4_h_values(img_color):
+    h = rgb2hsv(img_color)[:, :, 0]
+    h = h * 360
+    h = h.astype(int)
+    unique, counts = np.unique(h, return_counts=True)
+    values = dict(zip(unique, counts))
+    h_sorted = sorted(values.items(), key=operator.itemgetter(1))
+    # pobierz najczęściej występujące top 4 wartości h
+    return h_sorted[-4:]
+
+def find_contours_based_coins_detector(img_binary):
+    contours = find_contours(img_binary, .2, fully_connected='high')
+    coins = []
     for i, img in enumerate(contours):
-        binary[img] = 1
-    drawPlot(binary)
-    return
-    #drawPlot(binary)
+        coins.append(img)
 
-    #coins detection method 1
-    binary = dilation(binary)
+    return coins
+
+#uses region based detection
+def region_based_coins_detector(img_binary):
+    markers = np.zeros_like(img_binary)
+    markers[img_binary < np.percentile(img_binary, 45)] = 1
+    markers[img_binary > np.percentile(img_binary, 90)] = 2
+    unique, counts = np.unique(markers, return_counts=True)
+    values = dict(zip(unique, counts))
+    print(values)
+    elevation_map = filters.sobel(img_binary)
+    segmentation = watershed(elevation_map, markers)
+    segmentation = ndi.binary_fill_holes(segmentation - 1)
+    labeled_coins, _ = ndi.label(segmentation)
+    return labeled_coins
+
+def edge_based_coin_detector(img_binary):
+    binary = dilation(img_binary)
     fill_coins = fill_coins = ndi.binary_fill_holes(binary)
     label_objects, nb_labels = ndi.label(fill_coins)
     sizes = np.bincount(label_objects.ravel())
     mask_sizes = sizes > 200
     mask_sizes[0] = 0
     coins_cleaned = mask_sizes[label_objects]
-    
+    return coins_cleaned
 
-    plot_histogram(image2)
-    
-    binary = image
-    markers = np.zeros_like(binary)
-    markers[binary < np.percentile(binary, 45)] = 1
-    markers[binary > np.percentile(binary, 90)] = 2
-    unique, counts = np.unique(markers, return_counts=True)
-    values = dict(zip(unique, counts))
-    print(values)
-    elevation_map = filters.sobel(binary)
-    segmentation = watershed(elevation_map, markers)
-    segmentation = ndi.binary_fill_holes(segmentation - 1)
-    labeled_coins, _ = ndi.label(segmentation)
-    drawPlot(labeled_coins)
-    return
-    '''
+def get_hsv_mean(img_rgb_color):
+    img_color = rgb2hsv(img_rgb_color)
+    colors = [np.mean(img_color[:, :, i]) for i in range(0, 3)]
+    return np.mean(colors)
+
+def save_data_to_log(text):
+    log.write(text + "\n")
+
+def coins_detector(fig_name):
+    binary = skimage.morphology.dilation(edges)
+    binary = label(binary)
+
     regions = regionprops(binary)
     region_sizes = [reg.bbox for reg in regions]
-    iter  = 0
+    coin_number  = 0
+    coins_on_image = []
     for region in regions:
+        #check region's overlapping
         if region_is_inside_another(region_sizes, region.bbox):
             continue
 
-        # take regions with large enough areas
+        # take larger regions that don't exceed 50% of the image surface
         if region.area >= 1300 and region.area < (.5*len(binary)*len(binary[0])):
-            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-            name  =  "fig_{q}_{w}".format(q = fig_name, w = iter)
+            name  =  "{fig_name}_{number}".format(fig_name = fig_name, number = coin_number)
 
-            # draw rectangle around segmented coins
+            # get region
             minr, minc, maxr, maxc = region.bbox
             #rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
             #                          fill=False, edgecolor='red', linewidth=2)
-            coin = image2[minr:maxr, minc:maxc]
 
-            binary = ndi.binary_fill_holes(dilation(binary))
-            clear_background(coin, ~binary[minr:maxr, minc:maxc])
-            ration, is_silver = silver_detector_clear_background(coin)
-            print(name, ration)
+            coin = image_color[minr:maxr, minc:maxc]
+            coin_binary = binary[minr:maxr, minc:maxc]
+            convex_hull_mask = get_convex_hull_mask(coin_binary, region.label)
 
-            coin = filters.gaussian(coin, 2)
+
+            #clear_background(coin, ~get_filled_shape_mask(coin_binary))
+            clear_background(coin, ~convex_hull_mask)
+            ratio, is_silver = silver_detector_clear_background(coin)
+
+            #oblicz średnią, nie uwzględniaj czarnego
             mean_cut = calculate_mean(coin)
-            #drawPlot(coin)
-            #drawPlot(filters.gaussian(coin, 2))
-            ax.imshow(coin)
-            #h = rgb2hsv(coin)[:,:,0]
-            #h[h < np.percentile(h, 12.5)] = 0
-            #h[h > np.percentile(h, 87.5)] = 1
-            #ax.text(0, -10,"mean: {m}, median {m1} , rozrzut {m2}".format(m = np.mean(h), m1 = np.median(h), m2 = np.percentile(h,87.5) - np.percentile(h, 12.5)), color='k', fontsize=10)
-            #str = "{n};{m};{m1};{m2}".format(n = name, m = np.mean(h), m1 = np.median(h), m2 = np.percentile(h,87.5) - np.percentile(h, 12.5))
-            str = "{n};{m};{s};{r}".format(n = name, m = mean_cut, s = is_silver, r = ration)
-            ax.text(0, -10,str, color='k', fontsize=10)
-            log.write(str + "\n")
-            plt.savefig("h_means_clear_background" + "/" + name)
-            #plot_histogram(coin)
-            #r,g,b = extractRGB(coin)
+            #zapisz histogram
+            #plot_histogram(coin, name)
 
-            #coin = filters.median(coin, np.ones((5,5)))
-            #extractRGB(coin)
-            #color_distance(coin)
-            #coin = label(rgb2gray(coin))
-            #image_label_overlay = label2rgb(coin, image=image2[minr:maxr, minc:maxc])
-            #drawPlot(image_label_overlay)
-            #str = "{n};{all}".format(n = name, all = np.mean(coin))
-            #log.write(str + "\n")
-            iter+=1
-            continue
-            #coin = filters.median(rgb2gray(coin), np.ones((5,5)))
-            ax.imshow(rgb2gray(coin))
-            plt.show()
-            plt.savefig("out/" + name)
-            iter += 1
-            minc = 0
-            minr = 0
-            color = 'k'
-            break
-            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-
-            ax.imshow(coin[:,:,1])
-            plt.show()
-            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-
-            ax.imshow(coin[:,:,2])
-            plt.show()
-            continue
-            colors = [np.mean(coin[:,:,i]) for i in range(0,3)]
-
-            name  =  "fig_{q}_{w}".format(q = fig_name, w = iter)
-            text_0 = "r:%.2f" %  np.mean(colors[0])
-            text_1 =  "g:%.2f" %  np.mean(colors[1])
-            text_2 =  "b:%.2f" %  np.mean(colors[2])
-            text_3 = " rozrzut: %.2f" % (np.max(colors) - np.min(colors))
-            #text_file.write(name + ";" + text_0 + ";" + text_1 + ";" + text_2+ "\n  ")
-            ax.text(minc, minr - 10, name + " " + text_0 + " " + text_1 + " " + text_2 + " " + text_3, color=color, fontsize=10)
-            #images.append(coin)
-            #ax.add_patch(rect)
-            plt.show()
-            #fig.savefig("out/" + name)
-            iter += 1
-            flush_figures()
+            h_sorted = top4_h_values(coin)[:-1] #take 3 top, dismiss first one cause its black color
+            h_values = [val[0] for val in h_sorted]
+            values = "{};{};{}".format(h_values[0], h_values[1], h_values[2])
+            print(values)
+            if is_silver:
+                coin_class = "silver"
+            else:
+                coin_class = "not silver"
+            figure_description = "{n};{m};{s};{r};{h};{c_class}".format(n = name, m = mean_cut, s = is_silver, r = ratio, h = values, c_class = coin_class)
+            save_coin_with_text(coin, figure_description, "temp", name)
+            coin_number += 1
 
 
-
-directory = os.getcwd()+"\\templates" + '/'
-images = []
-fig_name = 0
-
-img_templates = ((.05, "5gr.png"), (1, "1zl.png"))
-
-img_template = histogram_manipulator.contrast_stretching(img.load(directory + "1zl.png", True))
-'''orb = cv2.ORB_create()
-kp = orb.detect(imag, None)
-kp_template, des = orb.compute(imag, kp)
-img3 = np.zeros(imag.shape)
-img2 = cv2.drawKeypoints(imag, kp, img3, color=(0,255,0), flags=0)
-plt.imshow(img2)
-plt.show()
-'''
-directory = os.getcwd()+"\\moje" + '/'
-
+directory = os.getcwd()+"\\data" + '/'
 log = open("out/h_means_clear_background.csv", "w+")
 for file in os.listdir(directory):
-    # images.append(rgb2gray(img.load(directory + file)))
-    #ORB
-    '''
-    #image = img.load(directory + file, True)
-    #detector.exec(img_template, histogram_manipulator.contrast_stretching(image[126:899, 138:871]), file)
-    #img = hist.contrast_stretching(img)'''
-
-    '''
-    image = img.load(directory + file)
-    method2(image, rgb2gray(image))
-    '''
-
-
     #standard
-    image = img.load(directory+file,True)
-    image2 = img.load(directory+file,False)
+    image_color = img.load(directory + file, False)
+    image_gray = rgb2gray(image_color)
     '''
     image2 = rgb2hsv(image2)
     h = image2[:,:,0]   #take h values
@@ -348,28 +331,8 @@ for file in os.listdir(directory):
     image2 = image2+h_prim*R
     drawPlot(image2)
     '''
-
-    ''' Roman
-    imgColor = exposure.rescale_intensity(image2)
-    imgG = rgb2gray(imgColor)
-    gauss = filters.gaussian(imgG, sigma=0.5)
-    canny = feature.canny(gauss, sigma=1)
-    sobel = filters.sobel(canny)
-    dil = mp.dilation(sobel)
-    contours = find_contours(dil, 0.2)
-    for i, img in enumerate(contours):
-        drawPlot(img)
-    continue
-    '''
-
-    #edges = filters.gaussian(image)
-    edges = skimage.filters.sobel(image)
+    edges = skimage.filters.sobel(image_gray)
     edges = skimage.feature.canny(edges,1.2)
-
-    #meanV = getMean("sobel_max_", edges)
-    thresh(0.08)
-    fig_name += 1
+    coins_detector(file)
 
 log.close()
-#displaySaveImage(images)
-#plt.show()
