@@ -113,9 +113,12 @@ def color_distance(image):
     ax3.set_title('Distance to pure blue')
     plt.show()
 
-def drawPlot(image):
+def drawPlot(image, patch = False):
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10,10))
     ax.imshow(image, cmap=plt.cm.gray)
+    if patch:
+        rect = mpatches.Circle((len(image[0])/2, len(image)/2), len(image)*.3 , color = 'k', fill=True , edgecolor='k', linewidth=2)
+        ax.add_patch(rect)
     plt.show()
 
 def getMean(desc, image):
@@ -145,6 +148,7 @@ def silver_detector(coin):
     return ratio,ratio > .5
 
 def silver_detector_clear_background(coin):
+    ratio = 0
     points = 0
     eligible = 0    #pixels which has small variety of rgb components
     for row in coin:
@@ -156,7 +160,8 @@ def silver_detector_clear_background(coin):
                 eligible += 1
             points += 1
 
-    ratio = eligible / points
+    if points > 0:
+        ratio = eligible / points
 
     return (ratio,ratio > .095)
 
@@ -172,8 +177,9 @@ def clear_background(img, mask):
             if mask[row][column]:
                 img[row][column] = [0,0,0]
 
-def calculate_mean(img):
-    img2 = rgb2hsv(img)[:,:,0]
+#rgb
+def calculate_mean(img, pos):
+    img2 =(img)[:,:,pos]
     img2 = np.where(img2 == 0, np.nan, img2)
     mean = np.nanmean(img2)
     return mean
@@ -199,7 +205,7 @@ def plot_histogram(img, name):
     ax.plot(np.arange(0, 255, 1),histo)
     ax2.imshow(img)
     #plt.show()
-    fig.savefig("clear_background_hists_convex_mask/" + name + ".png")
+    fig.savefig("hist_nowe/" + name + ".png")
     #plt.hist(img.ravel(), 256, [0, 256])
     #plt.show()
 
@@ -226,6 +232,8 @@ def top4_h_values(img_color):
     h_sorted = sorted(values.items(), key=operator.itemgetter(1))
     # pobierz najczęściej występujące top 4 wartości h
     return h_sorted[-4:]
+def get_saturaition(img_rgb):
+    return rgb2hsv(img_rgb)[:, :, 1]
 
 def find_contours_based_coins_detector(img_binary):
     contours = find_contours(img_binary, .2, fully_connected='high')
@@ -280,16 +288,24 @@ def coins_detector(fig_name):
         if region_is_inside_another(region_sizes, region.bbox):
             continue
 
-        # take larger regions that don't exceed 50% of the image surface
-        if region.area >= 1300 and region.area < (.5*len(binary)*len(binary[0])):
+        # take larger regions that don't exceed 30% of the image surface
+        if region.area >=  (.001*len(binary)*len(binary[0])) and region.area  < (.2*len(binary)*len(binary[0])):
             name  =  "{fig_name}_{number}".format(fig_name = fig_name, number = coin_number)
 
             # get region
             minr, minc, maxr, maxc = region.bbox
-            #rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
-            #                          fill=False, edgecolor='red', linewidth=2)
 
             coin = image_color[minr:maxr, minc:maxc]
+
+            #promień na 60% szerokości zdjęcia  int(len(coin)*.3)
+            coin2 = cv2.circle(coin, (int(len(coin[0])/2) , int(len(coin)/2)), int(len(coin[0])*.3), color=[0,0,0], thickness=-1)
+
+            drawPlot(coin2)
+            continue
+            #kwadrat w środku
+            #coin[int(len(coin)*.3):int(len(coin)*.7), int(len(coin[0])*.3): int(len(coin[0])*.7)] = [0,0,0]
+
+
             coin_binary = binary[minr:maxr, minc:maxc]
             convex_hull_mask = get_convex_hull_mask(coin_binary, region.label)
 
@@ -297,27 +313,40 @@ def coins_detector(fig_name):
             #clear_background(coin, ~get_filled_shape_mask(coin_binary))
             clear_background(coin, ~convex_hull_mask)
             ratio, is_silver = silver_detector_clear_background(coin)
+            '''
+            is_dwojka = 'n'
+            if is_silver:
+                mean_dwojka = calculate_mean(coin)
+                is_dwojka= 't'
+            '''
+            #oblicz średnie, nie uwzględniaj czarnego, średnie dla wszystkich 3 kanałów rgb
+            means = [calculate_mean(coin,i) for i in range(0,3)]
+            #mean_cut = calculate_mean(coin)
 
-            #oblicz średnią, nie uwzględniaj czarnego
-            mean_cut = calculate_mean(coin)
+            #1 średnia z kanałów
+            mean_cut = np.mean(means)
             #zapisz histogram
             #plot_histogram(coin, name)
 
             h_sorted = top4_h_values(coin)[:-1] #take 3 top, dismiss first one cause its black color
             h_values = [val[0] for val in h_sorted]
-            values = "{};{};{}".format(h_values[0], h_values[1], h_values[2])
+            s = np.mean(get_saturaition(coin))
+            #values = "{};{};{}".format(h_values[0], h_values[1], h_values[2])
+            values = ";;;"
             print(values)
             if is_silver:
-                coin_class = "silver"
+                coin_class = "s"
             else:
-                coin_class = "not silver"
-            figure_description = "{n};{m};{s};{r};{h};{c_class}".format(n = name, m = mean_cut, s = is_silver, r = ratio, h = values, c_class = coin_class)
+                coin_class = "ns"
+            figure_description = "{n};{m};{s};{r};{h};{c_class};{area};{sat};{is_dwoj}".format(n = name, m = mean_cut, s = is_silver, r = ratio, h = values, c_class = coin_class, area =region.area, sat = s, is_dwoj = 'n')
+            save_data_to_log(figure_description)
             save_coin_with_text(coin, figure_description, "temp", name)
+
             coin_number += 1
 
 
-directory = os.getcwd()+"\\data" + '/'
-log = open("out/h_means_clear_background.csv", "w+")
+directory = os.getcwd()+"\\data_2" + '/'
+log = open("temp/nowe.csv", "w+")
 for file in os.listdir(directory):
     #standard
     image_color = img.load(directory + file, False)
