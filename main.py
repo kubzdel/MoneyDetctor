@@ -300,8 +300,7 @@ def coins_detector(fig_name):
             #promień na 60% szerokości zdjęcia  int(len(coin)*.3)
             coin2 = cv2.circle(coin, (int(len(coin[0])/2) , int(len(coin)/2)), int(len(coin[0])*.3), color=[0,0,0], thickness=-1)
 
-            drawPlot(coin2)
-            continue
+
             #kwadrat w środku
             #coin[int(len(coin)*.3):int(len(coin)*.7), int(len(coin[0])*.3): int(len(coin[0])*.7)] = [0,0,0]
 
@@ -311,7 +310,11 @@ def coins_detector(fig_name):
 
 
             #clear_background(coin, ~get_filled_shape_mask(coin_binary))
-            clear_background(coin, ~convex_hull_mask)
+            clear_background(coin2, ~convex_hull_mask)
+
+            drawPlot(coin)
+            continue
+
             ratio, is_silver = silver_detector_clear_background(coin)
             '''
             is_dwojka = 'n'
@@ -345,7 +348,7 @@ def coins_detector(fig_name):
             coin_number += 1
 
 
-directory = os.getcwd()+"\\data_2" + '/'
+directory = os.getcwd()+"\\data_3" + '/'
 log = open("temp/nowe.csv", "w+")
 for file in os.listdir(directory):
     #standard
